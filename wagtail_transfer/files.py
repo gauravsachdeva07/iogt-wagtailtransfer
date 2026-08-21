@@ -3,9 +3,11 @@ from contextlib import contextmanager
 
 import requests
 from django.core.files.base import ContentFile
+import logging
 
 from .models import ImportedFile
 
+logger = logging.getLogger(__name__)
 
 @contextmanager
 def open_file(field, file):
@@ -104,6 +106,7 @@ class File:
 
     def transfer(self):
         response = requests.get(self.source_url)
+        logger.info("gaurav -- __init__ response", response)
 
         if response.status_code != 200:
             raise FileTransferError("Non-200 response from image URL")
