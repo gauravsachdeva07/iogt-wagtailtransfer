@@ -133,12 +133,12 @@ class FieldLocator:
         # pair up field names with their respective items in the UID tuple, to form a filter dict
         # that we can use for an ORM lookup
         filters = dict(zip(self.fields, uid))
-        logger.info("gaurav -- find %s | %s", uid, filters)
+        logger.info("gaurav -- FieldLocator find uid: %s | filters: %s", uid, filters)
 
         try:
             return self.model.objects.get(**filters)
         except self.model.MultipleObjectsReturned:
-            logger.info("gaurav -- find self.model.MultipleObjectsReturned %s | %s", uid, filters)
+            logger.info("gaurav -- FieldLocator find self.model.MultipleObjectsReturned %s | %s", uid, filters)
             return self.model.objects.filter(**filters).first()
         except self.model.DoesNotExist:
             logger.debug(f"Couldn't find {self.model} using {filters}, returning None")

@@ -206,7 +206,7 @@ def chooser_api_proxy(request, source_name, path):
         'Accept': request.headers['accept'],
     }, timeout=api_proxy_timeout_seconds)
 
-    logger.info("gaurav -- chooser_api_proxy response %s", response)
+    logger.info("gaurav -- chooser_api_proxy response %s | headers %s", response.text, response.headers)
 
     return HttpResponse(response.content, status=response.status_code)
 
@@ -248,7 +248,7 @@ def import_missing_object_data(source, importer: ImportPlanner):
         response = requests.post(
             f"{base_url}api/objects/", params={'digest': digest}, data=request_data
         )
-        logger.info("gaurav -- import_missing_object_data response %s", response)
+        logger.info("gaurav -- import_missing_object_data response %s | headers %s", response.text, response.headers)
 
         importer.add_json(response.content)
     importer.run()
@@ -262,7 +262,7 @@ def import_page(request):
 
     response = requests.get(f"{base_url}api/pages/{request.POST['source_page_id']}/", params={'digest': digest})
 
-    logger.info("gaurav -- import_page response %s", response)
+    logger.info("gaurav -- import_page response %s | headers %s", response.text, response.headers)
 
     dest_page_id = request.POST['dest_page_id'] or None
     importer = ImportPlanner.for_page(source=request.POST['source_page_id'], destination=dest_page_id)
@@ -292,7 +292,7 @@ def import_model(request):
 
     response = requests.get(url, params={'digest': digest})
 
-    logger.info("gaurav -- import_model response %s", response)
+    logger.info("gaurav -- import_model response %s | headers %s", response.text, response.headers)
 
     importer = ImportPlanner.for_model(model=model)
     importer.add_json(response.content)

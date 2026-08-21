@@ -244,7 +244,7 @@ class ManyToOneRelAdapter(FieldAdapter):
             locator = get_locator_for_model(self.related_base_model)
             matched_destination_ids = set()
             for uid in uids:
-                logger.info("gaurav -- get_object_deletions uid %s %s", uid, len(uids))
+                logger.info("gaurav -- get_object_deletions uid %s | len.uuids: %s", uid, len(uids))
                 child = locator.find(uid)
                 if child is not None:
                     matched_destination_ids.add(child.pk)
