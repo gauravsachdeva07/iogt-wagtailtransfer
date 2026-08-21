@@ -106,7 +106,7 @@ class File:
 
     def transfer(self):
         response = requests.get(self.source_url)
-        logger.info("gaurav -- __init__ response", response)
+        logger.info("gaurav -- __init__ response %s", response)
 
         if response.status_code != 200:
             raise FileTransferError("Non-200 response from image URL")
