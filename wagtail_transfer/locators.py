@@ -136,6 +136,9 @@ class FieldLocator:
 
         try:
             return self.model.objects.get(**filters)
+        except self.model.MultipleObjectsReturned:
+            logger.debug("Multiple Objects Returned for the query for: %s, picking up the first: %s | %s", self.model, uid, filters)
+            return self.model.objects.filter(**filters).first()
         except self.model.DoesNotExist:
             logger.debug(f"Couldn't find {self.model} using {filters}, returning None")
             return None
