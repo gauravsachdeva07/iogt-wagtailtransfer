@@ -15,6 +15,7 @@ from .field_adapters import adapter_registry
 from .locators import get_locator_for_model
 from .models import get_base_model, get_base_model_for_path, get_model_for_path
 
+from django.db import IntegrityError
 
 logger = logging.getLogger(__name__)
 
@@ -213,50 +214,60 @@ class ImportPlanner:
             records. This may include additional objects beyond the ones listed in ids_for_import,
             to assist in resolving related objects.
         """
-        data = json.loads(json_data)
+        try:
+            data = json.loads(json_data)
+            
+            # for each ID in the import list, add to base_import_ids as an object explicitly selected
+            # for import
+            logging.info("gaurav -- ImportPlanner add_json: %s", data['ids_for_import'])
+            for model_path, source_id in data['ids_for_import']:
+    
+                model = get_base_model_for_path(model_path)
+                self.base_import_ids.add((model, source_id))
+    
+            # add source id -> uid mappings to the uids_by_source dict, and add objectives 
+            # for importing referenced models
+            for model_path, source_id, jsonish_uid in data['mappings']:
+                model = get_base_model_for_path(model_path)
+                uid = get_locator_for_model(model).uid_from_json(jsonish_uid)
+                self.context.uids_by_source[(model, source_id)] = uid
+    
+                base_import = (model, source_id) in self.base_import_ids
+    
+                if base_import or model_path not in NO_FOLLOW_MODELS:
+                    objective = Objective(
+                        model, source_id, self.context,
+                        must_update=(base_import or model_path in UPDATE_RELATED_MODELS)
+                    )
+    
+                    # add to the set of objectives that need handling
+                    self._add_objective(objective)
+    
+            # add object data to the object_data_by_source dict
+            for obj_data in data['objects']:
+                self._add_object_data_to_lookup(obj_data)
+    
+            # retry tasks that were previously postponed due to missing object data
+            self._retry_tasks()
+    
+    
+            # Process all unhandled objectives - which may trigger new objectives as dependencies of
+            # the resulting operations - until no unhandled objectives remain
+            while self.unhandled_objectives:
+                objective = self.unhandled_objectives.pop()
+                self._handle_objective(objective)
+        except IntegrityError as e:
+            logger.info("gaurav -- IntegrityError add_json %s", e)
 
-        # for each ID in the import list, add to base_import_ids as an object explicitly selected
-        # for import
-        for model_path, source_id in data['ids_for_import']:
-            model = get_base_model_for_path(model_path)
-            self.base_import_ids.add((model, source_id))
-
-        # add source id -> uid mappings to the uids_by_source dict, and add objectives 
-        # for importing referenced models
-        for model_path, source_id, jsonish_uid in data['mappings']:
-            model = get_base_model_for_path(model_path)
-            uid = get_locator_for_model(model).uid_from_json(jsonish_uid)
-            self.context.uids_by_source[(model, source_id)] = uid
-
-            base_import = (model, source_id) in self.base_import_ids
-
-            if base_import or model_path not in NO_FOLLOW_MODELS:
-                objective = Objective(
-                    model, source_id, self.context,
-                    must_update=(base_import or model_path in UPDATE_RELATED_MODELS)
-                )
-
-                # add to the set of objectives that need handling
-                self._add_objective(objective)
-
-        # add object data to the object_data_by_source dict
-        for obj_data in data['objects']:
-            self._add_object_data_to_lookup(obj_data)
-
-        # retry tasks that were previously postponed due to missing object data
-        self._retry_tasks()
-
-
-        # Process all unhandled objectives - which may trigger new objectives as dependencies of
-        # the resulting operations - until no unhandled objectives remain
-        while self.unhandled_objectives:
-            objective = self.unhandled_objectives.pop()
-            self._handle_objective(objective)
 
     def _add_object_data_to_lookup(self, obj_data):
-        model = get_base_model_for_path(obj_data['model'])
-        source_id = obj_data['pk']
-        self.object_data_by_source[(model, source_id)] = obj_data
+        try:
+            model = get_base_model_for_path(obj_data['model'])
+            source_id = obj_data['pk']
+            self.object_data_by_source[(model, source_id)] = obj_data
+        except IntegrityError as e:
+            logger.info("gaurav -- IntegrityError _add_object_data_to_lookup %s", e)
+
 
     def _add_objective(self, objective):
         # add to the set of objectives that need handling, unless it's one we've already seen
@@ -285,30 +296,35 @@ class ImportPlanner:
 
 
     def _handle_objective(self, objective):
-        if not objective.exists_at_destination:
-
-            # object does not exist locally - create it if we're allowed to do so, i.e.
-            # it is in the set of objects explicitly selected for import, or it is a related object
-            # that we have not been blocked from following by NO_FOLLOW_MODELS
-            if (
-                objective.model._meta.label_lower in NO_FOLLOW_MODELS
-                and (objective.model, objective.source_id) not in self.base_import_ids
-            ):
-                # NO_FOLLOW_MODELS prevents us from creating this object
-                self.failed_creations.add((objective.model, objective.source_id))
+        try:
+            if not objective.exists_at_destination:
+                logger.info("gaurav -- CREATE decided for", objective.model, objective.source_id) 
+    
+                # object does not exist locally - create it if we're allowed to do so, i.e.
+                # it is in the set of objects explicitly selected for import, or it is a related object
+                # that we have not been blocked from following by NO_FOLLOW_MODELS
+                if (
+                    objective.model._meta.label_lower in NO_FOLLOW_MODELS
+                    and (objective.model, objective.source_id) not in self.base_import_ids
+                ):
+                    # NO_FOLLOW_MODELS prevents us from creating this object
+                    self.failed_creations.add((objective.model, objective.source_id))
+                else:
+                    task = ('create', objective.model, objective.source_id)
+                    self._handle_task(task)
+    
             else:
-                task = ('create', objective.model, objective.source_id)
-                self._handle_task(task)
-
-        else:
-            # object already exists at the destination, so any objects referencing it can go ahead
-            # without being blocked by this task
-            self.resolutions[(objective.model, objective.source_id)] = None
-
-            if objective.must_update:
-                task = ('update', objective.model, objective.source_id)
-                self._handle_task(task)
-
+                # object already exists at the destination, so any objects referencing it can go ahead
+                # without being blocked by this task
+                self.resolutions[(objective.model, objective.source_id)] = None
+    
+                if objective.must_update:
+                    task = ('update', objective.model, objective.source_id)
+                    self._handle_task(task)
+        except IntegrityError as e:
+            logger.info("gaurav -- IntegrityError _handle_objective %s", e)
+            
+                
     def _handle_task(self, task):
         """
         Attempt to convert a task into a corresponding operation.May fail if we do not yet have
